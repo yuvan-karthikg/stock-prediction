@@ -16,7 +16,7 @@ def load_symbols():
 
 @st.cache_data
 def load_stock_data(symbol):
-    df = pd.read_csv('stock_prices.csv', parse_dates=['Date'])
+    df = pd.read_csv('symbols_valid_meta.csv', parse_dates=['Date'])
     df = df[df['Name'] == symbol].sort_values('Date')
     df['MA_10'] = df['Close'].rolling(10).mean()
     df['RSI'] = 100 - (100 / (1 + df['Close'].pct_change().rolling(14).mean()))
@@ -77,9 +77,9 @@ history = model.fit(X_train, y_train, epochs=epochs, batch_size=32, validation_d
 
 preds = model.predict(X_test)
 preds_rescaled = scaler.inverse_transform(np.concatenate([
-    np.zeros((preds.shape[0], 3)),  # Fill for Open, High, Low
-    preds,                          # Predicted Close
-    np.zeros((preds.shape[0], 3))   # Fill for Volume, MA_10, RSI
+    np.zeros((preds.shape[0], 3)),  
+    preds,                          
+    np.zeros((preds.shape[0], 3))   
 ], axis=1))[:,3]
 
 actual_rescaled = df['Close'].values[-len(preds_rescaled):]
