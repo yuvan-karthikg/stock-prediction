@@ -21,7 +21,7 @@ def add_technical_indicators(df):
     return df.dropna()
 
 def preprocess(df):
-    features = ['Open', 'High', 'Low', 'Close', 'Volume', 'MA_10', 'RSI']
+    features = ['Open','High','Low','Close','Volume','MA_10','RSI']
     scaler = MinMaxScaler()
     scaled = scaler.fit_transform(df[features])
     return scaled, scaler
@@ -48,70 +48,85 @@ def build_lstm(input_shape):
     return model
 
 # Streamlit UI
-st.title('Stock Market Prediction: Hybrid XGBoost-LSTM')
-st.write('Upload your Kaggle stock price data and NASDAQ symbols file to begin.')
+st.title('Hybrid XGBoost-LSTM Stock Price Predictor')
+st.write('Upload required CSV files to begin')
 
-symbols_file = st.sidebar.file_uploader("Upload NASDAQ Symbols CSV (symbols_valid_meta.csv)", type=['csv'])
-prices_file = st.sidebar.file_uploader("Upload Stock Prices CSV (Kaggle dataset)", type=['csv'])
+# Sidebar inputs
+symbols_file = st.sidebar.file_uploader("Upload NASDAQ Symbols CSV", type=['csv'])
+prices_file = st.sidebar.file_uploader("Upload Stock Prices CSV", type=['csv'])
 
 if symbols_file and prices_file:
+    # Load data
     nasdaq_symbols = load_symbols(symbols_file)
-    selected_symbol = st.sidebar.selectbox('Select NASDAQ Stock Ticker', nasdaq_symbols)
-    epochs = st.sidebar.slider('LSTM Training Epochs', 10, 50, 30)
+    selected_symbol = st.sidebar.selectbox('Select Stock Ticker', nasdaq_symbols)
+    epochs = st.sidebar.slider('Training Epochs', 10, 50, 30)
     lookback = st.sidebar.slider('Lookback Window (days)', 30, 100, 60)
 
-    # Load and filter data
+    # Process stock data
     df = pd.read_csv(prices_file, parse_dates=['Date'])
-    stock_df = df[df['Name'] == selected_symbol].sort_values('Date')
-    stock_df = add_technical_indicators(stock_df)
-    if len(stock_df) < lookback + 100:
-        st.error("Not enough data for this ticker after feature engineering. Try another ticker.")
+    stock_df = df[df['Symbol'] == selected_symbol].sort_values('Date')  # Corrected to 'Symbol'
+    
+    if len(stock_df) < 100:
+        st.error("Insufficient data for selected symbol")
     else:
-        scaled, scaler = preprocess(stock_df)
-        important_idx = select_features(scaled, stock_df['Close'].values)
-        X, y = create_sequences(scaled, important_idx, lookback)
+        stock_df = add_technical_indicators(stock_df)
+        
+        # Check data adequacy after preprocessing
+        if len(stock_df) < lookback + 100:
+            st.error("Not enough data points after feature engineering")
+        else:
+            scaled, scaler = preprocess(stock_df)
+            important_idx = select_features(scaled, stock_df['Close'].values)
+            X, y = create_sequences(scaled, important_idx, lookback)
 
-        split = int(0.8 * len(X))
-        X_train, y_train = X[:split], y[:split]
-        X_test, y_test = X[split:], y[split:]
+            # Train-test split
+            split = int(0.8 * len(X))
+            X_train, y_train = X[:split], y[:split]
+            X_test, y_test = X[split:], y[split:]
 
-        st.write('Training LSTM...')
-        model = build_lstm((lookback, len(important_idx)))
-        history = model.fit(X_train, y_train, epochs=epochs, batch_size=32, validation_data=(X_test, y_test), verbose=0)
+            # Model training
+            st.write('Training LSTM...')
+            model = build_lstm((lookback, len(important_idx)))
+            history = model.fit(X_train, y_train, epochs=epochs, batch_size=32, 
+                              validation_data=(X_test, y_test), verbose=0)
 
-        preds = model.predict(X_test)
-        # Reconstruct for inverse scaling
-        preds_full = np.zeros((len(preds), 7))
-        preds_full[:, 3] = preds.flatten()
-        preds_rescaled = scaler.inverse_transform(preds_full)[:, 3]
-        actual_rescaled = stock_df['Close'].values[-len(preds_rescaled):]
+            # Predictions
+            preds = model.predict(X_test)
+            
+            # Inverse scaling
+            preds_full = np.zeros((len(preds), 7))
+            preds_full[:, 3] = preds.flatten()
+            preds_rescaled = scaler.inverse_transform(preds_full)[:,3]
+            actual_rescaled = stock_df['Close'].values[-len(preds_rescaled):]
 
-        # Plot
-        st.subheader(f'Predicted vs Actual Close Price for {selected_symbol}')
-        fig, ax = plt.subplots()
-        ax.plot(stock_df['Date'].values[-len(preds_rescaled):], actual_rescaled, label='Actual')
-        ax.plot(stock_df['Date'].values[-len(preds_rescaled):], preds_rescaled, label='Predicted')
-        ax.legend()
-        st.pyplot(fig)
+            # Plot results
+            st.subheader(f'Predictions vs Actual: {selected_symbol}')
+            fig, ax = plt.subplots(figsize=(12,6))
+            ax.plot(stock_df['Date'].values[-len(preds_rescaled):], actual_rescaled, label='Actual')
+            ax.plot(stock_df['Date'].values[-len(preds_rescaled):], preds_rescaled, label='Predicted')
+            ax.legend()
+            st.pyplot(fig)
 
-        # Metrics
-        from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-        rmse = np.sqrt(mean_squared_error(actual_rescaled, preds_rescaled))
-        mae = mean_absolute_error(actual_rescaled, preds_rescaled)
-        r2 = r2_score(actual_rescaled, preds_rescaled)
-        st.write(f'**RMSE:** {rmse:.2f}')
-        st.write(f'**MAE:** {mae:.2f}')
-        st.write(f'**R² Score:** {r2:.3f}')
+            # Metrics
+            from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+            rmse = np.sqrt(mean_squared_error(actual_rescaled, preds_rescaled))
+            mae = mean_absolute_error(actual_rescaled, preds_rescaled)
+            r2 = r2_score(actual_rescaled, preds_rescaled)
+            
+            st.metric("RMSE", f"{rmse:.2f}")
+            st.metric("MAE", f"{mae:.2f}")
+            st.metric("R² Score", f"{r2:.3f}")
 
-        st.write('**Model Training History**')
-        st.line_chart({'loss': history.history['loss'], 'val_loss': history.history['val_loss']})
+            # Training history
+            st.line_chart({
+                'Training Loss': history.history['loss'],
+                'Validation Loss': history.history['val_loss']
+            })
 
 else:
-    st.info("Please upload both the NASDAQ symbols and stock prices CSV files.")
+    st.info("Please upload both files to continue")
 
-st.write('---')
-st.write('**Instructions:**')
-st.write('1. Upload the NASDAQ symbols file (symbols_valid_meta.csv).')
-st.write('2. Upload your Kaggle stock price data (should have columns: Date, Open, High, Low, Close, Volume, Name).')
-st.write('3. Select a ticker, adjust parameters, and view predictions.')
+st.markdown("---")
+st.write("**Note:** Ensure your stock prices CSV contains these columns: ")
+st.write("Date, Open, High, Low, Close, Volume, Symbol")
 
