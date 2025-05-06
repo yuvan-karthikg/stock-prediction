@@ -7,25 +7,22 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 import matplotlib.pyplot as plt
 
-
+# 1. Load NASDAQ symbols from uploaded file
 @st.cache_data
-def load_symbols():
-    symbols = pd.read_csv('symbols_valid_meta.csv')
-    return symbols[symbols['Listing Exchange'] == 'Q']['Symbol'].unique()
+def load_symbols(symbols_file):
+    symbols = pd.read_csv(symbols_file)
+    nasdaq_symbols = symbols[symbols['Listing Exchange'] == 'Q']['Symbol'].unique()
+    return nasdaq_symbols
 
-
-@st.cache_data
-def load_stock_data(symbol):
-    df = pd.read_csv('symbols_valid_meta.csv', parse_dates=['Date'])
-    df = df[df['Name'] == symbol].sort_values('Date')
-    df['MA_10'] = df['Close'].rolling(10).mean()
+# 2. Preprocessing & Feature Engineering
+def add_technical_indicators(df):
+    df['MA_10'] = df['Close'].rolling(window=10).mean()
     df['RSI'] = 100 - (100 / (1 + df['Close'].pct_change().rolling(14).mean()))
-    df = df.dropna()
-    return df
+    return df.dropna()
 
 def preprocess(df):
+    features = ['Open', 'High', 'Low', 'Close', 'Volume', 'MA_10', 'RSI']
     scaler = MinMaxScaler()
-    features = ['Open','High','Low','Close','Volume','MA_10','RSI']
     scaled = scaler.fit_transform(df[features])
     return scaled, scaler
 
@@ -50,61 +47,71 @@ def build_lstm(input_shape):
     model.compile(optimizer='adam', loss='mse')
     return model
 
-st.title('Hybrid XGBoost-LSTM Stock Price Predictor')
+# Streamlit UI
+st.title('Stock Market Prediction: Hybrid XGBoost-LSTM')
+st.write('Upload your Kaggle stock price data and NASDAQ symbols file to begin.')
 
+symbols_file = st.sidebar.file_uploader("Upload NASDAQ Symbols CSV (symbols_valid_meta.csv)", type=['csv'])
+prices_file = st.sidebar.file_uploader("Upload Stock Prices CSV (Kaggle dataset)", type=['csv'])
 
-symbols = load_symbols()
-selected_symbol = st.sidebar.selectbox('Select NASDAQ Stock Ticker', symbols)
-epochs = st.sidebar.slider('LSTM Training Epochs', 10, 50, 30)
-lookback = st.sidebar.slider('Lookback Window (days)', 30, 100, 60)
+if symbols_file and prices_file:
+    nasdaq_symbols = load_symbols(symbols_file)
+    selected_symbol = st.sidebar.selectbox('Select NASDAQ Stock Ticker', nasdaq_symbols)
+    epochs = st.sidebar.slider('LSTM Training Epochs', 10, 50, 30)
+    lookback = st.sidebar.slider('Lookback Window (days)', 30, 100, 60)
 
+    # Load and filter data
+    df = pd.read_csv(prices_file, parse_dates=['Date'])
+    stock_df = df[df['Name'] == selected_symbol].sort_values('Date')
+    stock_df = add_technical_indicators(stock_df)
+    if len(stock_df) < lookback + 100:
+        st.error("Not enough data for this ticker after feature engineering. Try another ticker.")
+    else:
+        scaled, scaler = preprocess(stock_df)
+        important_idx = select_features(scaled, stock_df['Close'].values)
+        X, y = create_sequences(scaled, important_idx, lookback)
 
-df = load_stock_data(selected_symbol)
-scaled, scaler = preprocess(df)
-important_idx = select_features(scaled, df['Close'].values)
-X, y = create_sequences(scaled, important_idx, lookback)
+        split = int(0.8 * len(X))
+        X_train, y_train = X[:split], y[:split]
+        X_test, y_test = X[split:], y[split:]
 
+        st.write('Training LSTM...')
+        model = build_lstm((lookback, len(important_idx)))
+        history = model.fit(X_train, y_train, epochs=epochs, batch_size=32, validation_data=(X_test, y_test), verbose=0)
 
-split = int(0.8 * len(X))
-X_train, y_train = X[:split], y[:split]
-X_test, y_test = X[split:], y[split:]
+        preds = model.predict(X_test)
+        # Reconstruct for inverse scaling
+        preds_full = np.zeros((len(preds), 7))
+        preds_full[:, 3] = preds.flatten()
+        preds_rescaled = scaler.inverse_transform(preds_full)[:, 3]
+        actual_rescaled = stock_df['Close'].values[-len(preds_rescaled):]
 
+        # Plot
+        st.subheader(f'Predicted vs Actual Close Price for {selected_symbol}')
+        fig, ax = plt.subplots()
+        ax.plot(stock_df['Date'].values[-len(preds_rescaled):], actual_rescaled, label='Actual')
+        ax.plot(stock_df['Date'].values[-len(preds_rescaled):], preds_rescaled, label='Predicted')
+        ax.legend()
+        st.pyplot(fig)
 
-st.write('Training LSTM...')
-model = build_lstm((lookback, len(important_idx)))
-history = model.fit(X_train, y_train, epochs=epochs, batch_size=32, validation_data=(X_test, y_test), verbose=0)
+        # Metrics
+        from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+        rmse = np.sqrt(mean_squared_error(actual_rescaled, preds_rescaled))
+        mae = mean_absolute_error(actual_rescaled, preds_rescaled)
+        r2 = r2_score(actual_rescaled, preds_rescaled)
+        st.write(f'**RMSE:** {rmse:.2f}')
+        st.write(f'**MAE:** {mae:.2f}')
+        st.write(f'**R² Score:** {r2:.3f}')
 
+        st.write('**Model Training History**')
+        st.line_chart({'loss': history.history['loss'], 'val_loss': history.history['val_loss']})
 
-preds = model.predict(X_test)
-preds_rescaled = scaler.inverse_transform(np.concatenate([
-    np.zeros((preds.shape[0], 3)),  
-    preds,                          
-    np.zeros((preds.shape[0], 3))   
-], axis=1))[:,3]
-
-actual_rescaled = df['Close'].values[-len(preds_rescaled):]
-
-
-st.subheader(f'Predicted vs Actual Close Price for {selected_symbol}')
-fig, ax = plt.subplots()
-ax.plot(df['Date'].values[-len(preds_rescaled):], actual_rescaled, label='Actual')
-ax.plot(df['Date'].values[-len(preds_rescaled):], preds_rescaled, label='Predicted')
-ax.legend()
-st.pyplot(fig)
-
-
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-rmse = np.sqrt(mean_squared_error(actual_rescaled, preds_rescaled))
-mae = mean_absolute_error(actual_rescaled, preds_rescaled)
-r2 = r2_score(actual_rescaled, preds_rescaled)
-st.write(f'**RMSE:** {rmse:.2f}')
-st.write(f'**MAE:** {mae:.2f}')
-st.write(f'**R² Score:** {r2:.3f}')
-
-st.write('**Model Training History**')
-st.line_chart({'loss': history.history['loss'], 'val_loss': history.history['val_loss']})
+else:
+    st.info("Please upload both the NASDAQ symbols and stock prices CSV files.")
 
 st.write('---')
-st.write('**How to use:**')
-st.write('Select a NASDAQ stock, adjust parameters, and view the hybrid model’s prediction vs. actual closing prices.')
+st.write('**Instructions:**')
+st.write('1. Upload the NASDAQ symbols file (symbols_valid_meta.csv).')
+st.write('2. Upload your Kaggle stock price data (should have columns: Date, Open, High, Low, Close, Volume, Name).')
+st.write('3. Select a ticker, adjust parameters, and view predictions.')
 
