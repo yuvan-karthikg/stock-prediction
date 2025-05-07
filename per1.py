@@ -32,13 +32,13 @@ def preprocess(df):
 def select_features(scaled, target):
     xgb = XGBRegressor(objective='reg:squarederror', n_estimators=100)
     xgb.fit(scaled[:-100], target[:-100])
-    return xgb.feature_importances_.argsort()[-5:][::-1]  # Use top 5 features
+    return xgb.feature_importances_.argsort()[-5:][::-1]  
 
 def create_sequences(scaled, important_idx, lookback=60):
     X, y = [], []
     for i in range(lookback, len(scaled)):
         X.append(scaled[i-lookback:i, important_idx])
-        y.append(scaled[i, 3])  # Close price index
+        y.append(scaled[i, 3]) 
     return np.array(X), np.array(y)
 
 def build_lstm(input_shape):
@@ -52,7 +52,7 @@ def build_lstm(input_shape):
     return model
 
 st.title('Hybrid XGBoost-LSTM Stock Price Predictor')
-st.write('Upload NASDAQ symbols file & stock price CSV (e.g., ACER.csv) to begin.')
+st.write('Upload NASDAQ symbols file & stock price CSV (e.g., ACER.csv).')
 
 symbols_file = st.sidebar.file_uploader("Upload NASDAQ Symbols CSV (symbols_valid_meta.csv)", type=['csv'])
 prices_file = st.sidebar.file_uploader("Upload Single Stock Prices CSV (e.g., ACER.csv)", type=['csv'])
@@ -63,7 +63,7 @@ if symbols_file and prices_file:
     epochs = st.sidebar.slider('LSTM Training Epochs', 10, 50, 30)
     lookback = st.sidebar.slider('Lookback Window (days)', 30, 100, 60)
 
-    # Load price data
+    
     df = pd.read_csv(prices_file, parse_dates=['Date'])
     df['Symbol'] = selected_symbol
 
@@ -79,7 +79,7 @@ if symbols_file and prices_file:
             important_idx = select_features(scaled, stock_df['Close'].values)
             X, y = create_sequences(scaled, important_idx, lookback)
 
-            # Time-based split for time series
+            
             split = int(0.8 * len(X))
             X_train, y_train = X[:split], y[:split]
             X_test, y_test = X[split:], y[split:]
@@ -91,7 +91,7 @@ if symbols_file and prices_file:
                                 validation_data=(X_test, y_test), callbacks=[early_stop], verbose=0)
 
             preds = model.predict(X_test)
-            # Proper inverse scaling: use a template based on test set
+            
             X_sample = scaled[split+lookback-1:split+lookback]
             pred_template = np.repeat(X_sample, len(preds), axis=0)
             pred_template[:, 3] = preds.flatten()
@@ -123,4 +123,4 @@ else:
     st.info("Please upload both the NASDAQ & stock prices CSV file.")
 
 st.markdown("---")
-st.write("**Note:** Your stock prices CSV must contain these columns: Date, Open, High, Low, Close, Volume, and optionally Adj Close. No 'Name' or 'Symbol' column is needed in the file itself.")
+st.write("**Note:** Your stock prices CSV must contain these columns: Date, Open, High, Low, Close, Volume, and optionally Adj Close.")
