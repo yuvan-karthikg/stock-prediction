@@ -8,12 +8,16 @@ from tensorflow.keras.layers import LSTM, Dense
 from tensorflow.keras.callbacks import EarlyStopping
 import matplotlib.pyplot as plt
 
+
+#File Loader for NASDAQ Symbols
 @st.cache_data
 def load_symbols(symbols_file):
     symbols = pd.read_csv(symbols_file)
     nasdaq_symbols = symbols[symbols['Listing Exchange'] == 'Q']['Symbol'].unique()
     return nasdaq_symbols
 
+
+#Feature Engineering - Adding useful technical indicators to capture market trends
 def add_technical_indicators(df):
     df['MA_10'] = df['Close'].rolling(window=10).mean()
     df['RSI'] = 100 - (100 / (1 + df['Close'].pct_change().rolling(14).mean()))
@@ -23,17 +27,23 @@ def add_technical_indicators(df):
     df['MACD'] = df['Close'].ewm(span=12).mean() - df['Close'].ewm(span=26).mean()
     return df.dropna()
 
+
+#Normalize the dataset
 def preprocess(df):
     features = ['Open','High','Low','Close','Volume','MA_10','RSI','EMA_5','EMA_20','Volatility','MACD']
     scaler = MinMaxScaler()
     scaled = scaler.fit_transform(df[features])
     return scaled, scaler, features
 
+
+#Use XGBoost to identify top 5 imp features
 def select_features(scaled, target):
     xgb = XGBRegressor(objective='reg:squarederror', n_estimators=100)
     xgb.fit(scaled[:-100], target[:-100])
     return xgb.feature_importances_.argsort()[-5:][::-1]  
 
+
+#Convert data into sequence of llokback days for LSTM input
 def create_sequences(scaled, important_idx, lookback=60):
     X, y = [], []
     for i in range(lookback, len(scaled)):
@@ -41,6 +51,7 @@ def create_sequences(scaled, important_idx, lookback=60):
         y.append(scaled[i, 3]) 
     return np.array(X), np.array(y)
 
+#Build a 2-layer LSTM and prevent overfitting
 def build_lstm(input_shape):
     model = Sequential([
         LSTM(64, return_sequences=True, input_shape=input_shape, dropout=0.2, recurrent_dropout=0.2),
@@ -57,6 +68,8 @@ st.write('Upload NASDAQ symbols file & stock price CSV (e.g., ACER.csv).')
 symbols_file = st.sidebar.file_uploader("Upload NASDAQ Symbols CSV (symbols_valid_meta.csv)", type=['csv'])
 prices_file = st.sidebar.file_uploader("Upload Single Stock Prices CSV (e.g., ACER.csv)", type=['csv'])
 
+
+#Data validation & Pre processing
 if symbols_file and prices_file:
     nasdaq_symbols = load_symbols(symbols_file)
     selected_symbol = st.sidebar.selectbox('Select Stock Ticker', nasdaq_symbols)
