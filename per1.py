@@ -52,7 +52,7 @@ def build_lstm(input_shape):
     return model
 
 st.title('Hybrid XGBoost-LSTM Stock Price Predictor')
-st.write('Upload your NASDAQ symbols file and a single-ticker stock price CSV (e.g., ACER.csv) to begin.')
+st.write('Upload NASDAQ symbols file & stock price CSV (e.g., ACER.csv) to begin.')
 
 symbols_file = st.sidebar.file_uploader("Upload NASDAQ Symbols CSV (symbols_valid_meta.csv)", type=['csv'])
 prices_file = st.sidebar.file_uploader("Upload Single Stock Prices CSV (e.g., ACER.csv)", type=['csv'])
@@ -120,7 +120,7 @@ if symbols_file and prices_file:
             })
 
 else:
-    st.info("Please upload both the NASDAQ symbols and a single-ticker stock prices CSV file.")
+    st.info("Please upload both the NASDAQ & stock prices CSV file.")
 
 st.markdown("---")
 st.write("**Note:** Your stock prices CSV must contain these columns: Date, Open, High, Low, Close, Volume, and optionally Adj Close. No 'Name' or 'Symbol' column is needed in the file itself.")
