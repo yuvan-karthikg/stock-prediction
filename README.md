@@ -1,4 +1,4 @@
-Stock Market Prediction
+STOCK MARKET PREDICTION
 
 A Predictive Framework for Stock Market Movements Using Hybrid XGBoost-LSTM Architecture
 
