@@ -2,8 +2,6 @@ Stock Market Prediction
 
 A Predictive Framework for Stock Market Movements Using Hybrid XGBoost-LSTM Architecture
 
-Date: May 16, 2025
-
 
 OVERVIEW:
 
